@@ -1,7 +1,15 @@
 package main
 
-import "sbom.observer/cli/pkg/cmd"
+import (
+	"sbom.observer/cli/pkg/cmd"
+)
+
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
 
 func main() {
-	cmd.Execute()
+	cmd.Execute(version)
 }

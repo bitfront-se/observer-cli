@@ -6,8 +6,6 @@ import (
 	"sbom.observer/cli/pkg/log"
 )
 
-const Version = "0.1"
-
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "observer-cli",
@@ -19,7 +17,7 @@ PREVIEW: This is a preview release and is not yet ready for production use.`,
 	// has an action associated with it:
 	// Run: func(cmd *cobra.Command, args []string) { },
 
-	Version: Version,
+	Version: "dev",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		// setup logging
 		if debug, _ := cmd.Flags().GetBool("debug"); debug {
@@ -32,7 +30,8 @@ PREVIEW: This is a preview release and is not yet ready for production use.`,
 
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
-func Execute() {
+func Execute(version string) {
+	rootCmd.Version = version
 	err := rootCmd.Execute()
 	if err != nil {
 		os.Exit(1)

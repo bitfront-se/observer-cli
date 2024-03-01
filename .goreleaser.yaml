@@ -18,9 +18,10 @@ builds:
       - linux
       - windows
       - darwin
-    hooks:
-      post:
-        - trivy repo -f cyclonedx -o dist/bom.cdx.json .
+#    hooks:
+#      post:
+#         runs for every which is unnecessary
+#        - trivy repo -f cyclonedx -o dist/bom.cdx.json .
 
 archives:
   - format: tar.gz
@@ -43,6 +44,11 @@ changelog:
     exclude:
       - "^docs:"
       - "^test:"
+      - "^config:"
+      - "^wip"
+
+checksum:
+  name_template: 'checksums.txt'
 
 # .goreleaser.yaml
 release:
