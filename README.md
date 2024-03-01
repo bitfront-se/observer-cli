@@ -1,9 +1,9 @@
+**observer-cli** is a command-line-tool that allows you to create Software Bill of Materials (SBOMs) and interact with [SBOM Observer](https://sbom.observer) from the command line (and CI/CD pipelines etc).
+
 > [!IMPORTANT]
 > This is a preview software and is subject to change.
 
-**observer-cli** is a command-line-tool that allows you to create Software Bill of Materials (SBOMs) and interact with [SBOM Observer](https://sbom.observer) from the command line (and CI/CD pipelines etc).
-
-```bash
+```
 Usage:
 observer-cli [command]
 
@@ -16,9 +16,9 @@ repo        Create an SBOM from a source repository (or monorepo) (TODO)
 upload      Upload one or more attestations (SBOMs) to https://sbom.observer (TODO)
 
 Flags:
---debug     Enable debug logging (implies silent mode)
+    --debug     Enable debug logging (implies silent mode)
 -h, --help      help for observer-cli
---silent    Silent mode (no progress bars)
+    --silent    Silent mode (no progress bars)
 -v, --version   version for observer-cli
 
 Use "observer-cli [command] --help" for more information about a command.
@@ -26,7 +26,7 @@ Use "observer-cli [command] --help" for more information about a command.
 
 ## Authentication
 
-The CLI expects a `OBSERVER_TOKEN` environment variable to be set with a valid API token.
+The CLI expects an `OBSERVER_TOKEN` environment variable to be set with a valid API token.
 
 
 ## SBOM generation
