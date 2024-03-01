@@ -18,6 +18,9 @@ builds:
       - linux
       - windows
       - darwin
+    hooks:
+      post:
+        - trivy repo -f cyclonedx -o dist/bom.cdx.json .
 
 archives:
   - format: tar.gz
@@ -54,15 +57,15 @@ release:
   replace_existing_draft: true
 
   # If set to auto, will mark the release as not ready for production
-#  prerelease: auto
+  prerelease: auto
 
   # You can add extra pre-existing files to the release.
   # The filename on the release will be the last part of the path (base).
   # If another file with the same name exists, the last one found will be used.
   #
   # Templates: allowed
-#  extra_files:
-#    - glob: ./path/to/file.txt
+  extra_files:
+    - glob: ./dist/bom.cdx.json
 #    - glob: ./glob/**/to/**/file/**/*
 #    - glob: ./glob/foo/to/bar/file/foobar/override_from_previous
 #    - glob: ./single_file.txt
