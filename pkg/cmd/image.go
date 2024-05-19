@@ -30,7 +30,6 @@ func init() {
 
 	// toggles
 	imageCmd.Flags().BoolP("upload", "u", false, "Upload the results to https://sbom.observer")
-
 	imageCmd.Flags().String("scanner", "trivy", "SBOM scanner to use [trivy,syft] (default: trivy)")
 
 	// output

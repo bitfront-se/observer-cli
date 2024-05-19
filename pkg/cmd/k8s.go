@@ -238,66 +238,14 @@ func Kubectl(args ...string) (string, error) {
 	return output, err
 }
 
-func Trivy(args ...string) (string, error) {
-	log.Debug(fmt.Sprintf("running 'trivy %s'", strings.Join(args, " ")))
-
-	output, err := execx.Exec("trivy", args...)
-	if err != nil {
-		if errors.Is(err, execx.ErrNotFound) {
-			log.Error("Trivy not found in $PATH")
-			log.Print("Download and install Trivy from https://github.com/aquasecurity/trivy/releases")
-			// TODO: add curl download instructions (use Github releases API?)
-			os.Exit(1)
-		}
-	}
-
-	return output, err
-}
-
-func TrivyUpdateDb() error {
-	log.Debug("updating Trivy vulnerability database")
-
-	_, extErr := Trivy("image", "--download-db-only")
-	if extErr != nil {
-		return fmt.Errorf("failed to update Trivy vulnerability database: %w", extErr)
-	}
-
-	return nil
-}
-
-func TrivyUpdateJavaDb() error {
-	log.Debug("updating Trivy java database")
-
-	_, extErr := Trivy("image", "--download-java-db-only")
-	if extErr != nil {
-		return fmt.Errorf("failed to update Trivy java vulnerability database: %w", extErr)
-	}
-
-	return nil
-}
-
-func Syft(args ...string) (string, error) {
-	log.Debug(fmt.Sprintf("running 'syft %s'", strings.Join(args, " ")))
-
-	output, err := execx.Exec("syft", args...)
-	if err != nil {
-		if errors.Is(err, execx.ErrNotFound) {
-			log.Error("Syft not found in $PATH")
-			log.Print("Download and install Syft from https://github.com/anchore/syft")
-			// TODO: add curl download instructions (use Github releases API?)
-			os.Exit(1)
-		}
-	}
-
-	return output, err
-}
-
 func CreateImageSbom(engine string, image string, output string) error {
 	switch engine {
 	case "trivy":
 		return CreateImageSbomTrivy(image, output)
 	case "syft":
 		return CreateImageSbomSyft(image, output)
+	default:
+		log.Fatal("unsupported scanner engine", "engine", engine)
 	}
 	return nil
 }
