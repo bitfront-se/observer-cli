@@ -29,3 +29,4 @@ dist/
 /build-observer
 /scratches/
 /observer-linux
+.DS_Store
