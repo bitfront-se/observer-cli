@@ -2,7 +2,7 @@
 # vim: set ts=2 sw=2 tw=0 fo=cnqoj
 version: 1
 
-project_name: observer-cli
+project_name: observer
 
 before:
   hooks:

@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"golang.org/x/exp/maps"
 	"io/fs"
 	"net/textproto"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sbom.observer/cli/pkg/licenses"
 	"sbom.observer/cli/pkg/log"
 	"sbom.observer/cli/pkg/ospkgs"
 	"sort"
@@ -16,7 +18,7 @@ import (
 	"time"
 )
 
-// dkpg package contains code to parse dpkg various /var/lib/dpkg/* file types and provide
+// dkpg package contains code to parse various /var/lib/dpkg/* file types and provide
 // BOM information about the packages installed on the system.
 
 const (
@@ -24,20 +26,25 @@ const (
 )
 
 var (
-	statusPaths               = []string{"/var/lib/dpkg/status", "/var/lib/dpkg/status.d"}
-	dpkgSrcCaptureRegexp      = regexp.MustCompile(`(?P<name>[^\s]*)( \((?P<version>.*)\))?`)
-	dpkgSrcCaptureRegexpNames = dpkgSrcCaptureRegexp.SubexpNames()
+	statusPaths                = []string{"/var/lib/dpkg/status", "/var/lib/dpkg/status.d"}
+	dpkgSrcCaptureRegexp       = regexp.MustCompile(`(?P<name>[^\s]*)( \((?P<version>.*)\))?`)
+	dpkgSrcCaptureNameGroup    = dpkgSrcCaptureRegexp.SubexpIndex("name")
+	dpkgSrcCaptureVersionGroup = dpkgSrcCaptureRegexp.SubexpIndex("version")
+	dpkgUpstreamVersionRegexp  = regexp.MustCompile(`^(?:[0-9]+:)?(?P<version>(?:\.?[0-9]+)*)`)
+	dpkgUpstreamVersionGroup   = dpkgUpstreamVersionRegexp.SubexpIndex("version")
 )
 
 type Indexer struct {
 	files    map[string]string
 	packages map[string]*ospkgs.Package
+	detector *licenses.Detector
 }
 
 func NewIndexer() *Indexer {
 	return &Indexer{
 		files:    make(map[string]string),
 		packages: make(map[string]*ospkgs.Package),
+		detector: licenses.NewLicenseDetector(),
 	}
 }
 
@@ -55,14 +62,22 @@ func (i *Indexer) PackageForFile(filename string) (*ospkgs.Package, bool) {
 	pkg, ok := i.packages[name]
 
 	if !ok {
-		// name can contain an architecture 'linux-libc-dev:amd64'
-		// we only need the package name and architecture
+		// name can contain an architecture 'linux-libc-dev:amd64', we only need the package name
 		parts := strings.Split(name, ":")
 
 		pkg, ok = i.packages[parts[0]]
 	}
 
 	return pkg, ok
+}
+
+func (i *Indexer) InstalledPackage(name string) *ospkgs.Package {
+	pkg, ok := i.packages[name]
+	if !ok {
+		return nil
+	}
+
+	return pkg
 }
 
 //func (i *Indexer) InstalledPackages(pkg *ospkgs.Package) []string {
@@ -129,18 +144,6 @@ func (i *Indexer) Create() error {
 		}
 	}
 
-	//lines := []string{}
-	//for file, pkg := range i.files {
-	//	lines = append(lines, fmt.Sprintf("%s: %s", file, pkg))
-	//}
-	//sort.Strings(lines)
-	//
-	//for _, line := range lines {
-	//	if strings.Contains(line, "libc6-dev") {
-	//		log.Debug(line)
-	//	}
-	//}
-
 	took := time.Now().Sub(start) / time.Millisecond
 	log.Debugf("indexed %d files in %dms", len(i.files), took)
 
@@ -180,10 +183,6 @@ func (i *Indexer) Create() error {
 
 	took = time.Now().Sub(start) / time.Millisecond
 	log.Debugf("indexed %d packages in %dms", len(i.packages), took)
-
-	//for _, pkg := range i.packages {
-	//	log.Debugf("Package: %s %s %s -> %s %s -> %s", pkg.Name, pkg.Version, pkg.Architecture, pkg.SourceName, pkg.SourceVersion, pkg.Maintainer)
-	//}
 
 	return nil
 }
@@ -238,6 +237,10 @@ func (i *Indexer) parseStatusFile(filename string) error {
 
 			i.packages[pkg.Name] = pkg
 
+			for _, provides := range pkg.Provides {
+				i.packages[provides] = pkg
+			}
+
 			buff.Reset()
 			continue
 		}
@@ -251,13 +254,33 @@ func (i *Indexer) parseStatusFile(filename string) error {
 		}
 
 		i.packages[pkg.Name] = pkg
+
+		for _, provides := range pkg.Provides {
+			i.packages[provides] = pkg
+		}
+	}
+
+	// ignore any dependency that is not currently installed
+	// NOTE: the correct way to handle this would be to actually resolve which optional package  (e.g. 'libc6-dev | libc-dev, gcc-12+')
+	// dep is installed, but this is probably overkill in practice
+	for _, pkg := range i.packages {
+		installedDependencies := map[string]struct{}{}
+		for _, dep := range pkg.Dependencies {
+			if installedPackage, ok := i.packages[dep]; ok {
+				installedDependencies[installedPackage.Name] = struct{}{}
+			}
+			//else {
+			//	log.Warnf("Package %s depends on %s (%d) which is not installed -> %+v -> %d", pkg.Name, dep, len(dep), pkg.Dependencies, len(pkg.Dependencies))
+			//}
+		}
+		pkg.Dependencies = maps.Keys(installedDependencies)
 	}
 
 	return nil
 }
 
 func (i *Indexer) parseStatusPackage(buff *bytes.Buffer) (*ospkgs.Package, error) {
-	// input is MIME header formatted ex:
+	// input is MIME header formatted block ex:
 	/*
 		Package: adduser
 		Status: install ok installed
@@ -290,29 +313,45 @@ func (i *Indexer) parseStatusPackage(buff *bytes.Buffer) (*ospkgs.Package, error
 		Version:      values.Get("Version"),
 		Architecture: values.Get("Architecture"),
 		Maintainer:   values.Get("Maintainer"),
+		Provides:     parseDependsPackageNames(values.Get("Provides")),
+		Dependencies: parseDependsPackageNames(values.Get("Depends")),
 	}
 
 	// Source line (Optional). Package name and optionally version
 	if src := values.Get("Source"); src != "" {
-		// TODO: rewrite to use CG names instead
-		srcCapture := dpkgSrcCaptureRegexp.FindAllStringSubmatch(src, -1)[0]
-		md := make(map[string]string)
-		for i, n := range srcCapture {
-			md[dpkgSrcCaptureRegexpNames[i]] = strings.TrimSpace(n)
-		}
-		pkg.SourceName = md["name"]
-		pkg.SourceVersion = md["version"]
+		srcCapture := dpkgSrcCaptureRegexp.FindStringSubmatch(src)
+		pkg.SourceName = srcCapture[dpkgSrcCaptureNameGroup]
+		pkg.SourceVersion = srcCapture[dpkgSrcCaptureVersionGroup]
 
 		// if not version is provided in the source line, the bin package is based on the upstream version
 		// see https://git.dpkg.org/cgit/dpkg/dpkg.git/tree/lib/dpkg/pkg-format.c#n338
 		if pkg.SourceVersion == "" {
 			pkg.SourceVersion = pkg.Version
-		}
 
-		// any revision and epoch should be stripped (7.88.1-10+deb12u5 -> 7.88.1)
-		// see https://git.dpkg.org/cgit/dpkg/dpkg.git/tree/lib/dpkg/version.h#n38
-		pkg.SourceVersion = strings.Split(pkg.SourceVersion, "-")[0]
+			// any revision and epoch should probably be stripped (7.88.1-10+deb12u5 -> 7.88.1)
+			// see https://git.dpkg.org/cgit/dpkg/dpkg.git/tree/lib/dpkg/version.h#n38
+			ms := dpkgUpstreamVersionRegexp.FindStringSubmatch(pkg.SourceVersion)
+			pkg.SourceVersion = ms[dpkgUpstreamVersionGroup]
+		}
 	}
 
 	return &pkg, nil
+}
+
+func parseDependsPackageNames(line string) []string {
+	dependencies := map[string]struct{}{}
+	// example input:
+	// Depends: libc6-dev | libc-dev, libuuid1 (= 2.38.1-5+deb12u1)
+	ps := strings.Split(line, ",")
+	for _, p := range ps {
+		if p != "" {
+			for _, dep := range strings.Split(p, "|") {
+				dep, _, _ = strings.Cut(dep, "(")
+				dep, _, _ = strings.Cut(dep, ":")
+				dep = strings.TrimSpace(dep)
+				dependencies[dep] = struct{}{}
+			}
+		}
+	}
+	return maps.Keys(dependencies)
 }

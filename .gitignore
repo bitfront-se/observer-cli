@@ -24,5 +24,8 @@ go.work
 /TODO.txt
 /scratch/
 observer
-
 dist/
+.vagrant
+/build-observer
+/scratches/
+/observer-linux

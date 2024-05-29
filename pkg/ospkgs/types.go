@@ -7,4 +7,6 @@ type Package struct {
 	Maintainer    string
 	SourceName    string
 	SourceVersion string
+	Provides      []string
+	Dependencies  []string
 }

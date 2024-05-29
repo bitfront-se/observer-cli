@@ -2,9 +2,10 @@ package buildops
 
 import (
 	"bufio"
-	"errors"
+	"fmt"
 	"golang.org/x/exp/maps"
 	"os"
+	"sbom.observer/cli/pkg/licenses"
 	"sort"
 	"strings"
 )
@@ -67,44 +68,66 @@ func DependencyObservations(opens []string, executions []string) ([]string, []st
 }
 
 func isExternalInclude(open string) bool {
+	// TODO: should probable include everything in /usr/include and /usr/local/include as well
 	return strings.Contains(open, "/usr") && strings.HasSuffix(open, ".h")
 }
 
 func isCompilerCall(exec string) bool {
 	return strings.HasSuffix(exec, "/cc") ||
+		strings.HasSuffix(exec, "/cc1") ||
 		strings.HasSuffix(exec, "/gcc") ||
 		strings.HasSuffix(exec, "/clang") ||
 		strings.HasSuffix(exec, "/c++") ||
 		strings.HasSuffix(exec, "/g++") ||
 		strings.HasSuffix(exec, "/ld") ||
-		strings.HasSuffix(exec, "/as")
-
+		strings.HasSuffix(exec, "/as") ||
+		strings.HasSuffix(exec, "/go")
 }
 
-// TODO: remove this type
+// TODO: replace this with pkg/os/Package
 type Package struct {
 	Id              string
-	Debug           string
 	Arch            string
 	Name            string
 	Version         string
 	Dependencies    []string
-	IsSourcePackage bool
 	Files           []string
+	IsSourcePackage bool
+	Licenses        []licenses.License
 }
 
 type BuildDependencies struct {
-	Code  []Package
-	Tools []Package
+	Code       []Package
+	Tools      []Package
+	Transitive []Package
+	// NOTE: Code and Tools might contain the same package
 }
 
 func ResolveDependencies(opens []string, executions []string) (*BuildDependencies, error) {
-	//TODO: figure out if its a supported environment
-	packageManager := "dpkg"
+	// figure out if running in a supported environment (dpkg based, rpm based )
+	var packageManager = "unknown"
+
+	if _, err := os.Stat("/var/lib/dpkg/status"); err == nil {
+		packageManager = "dpkg"
+	}
+
+	for _, db := range []string{
+		"var/lib/rpm/Packages",
+		"var/lib/rpm/Packages.db",
+		"var/lib/rpm/rpmdb.sqlite",
+		"usr/lib/sysimage/rpm/Packages",
+		"usr/lib/sysimage/rpm/Packages.db",
+		"usr/lib/sysimage/rpm/rpmdb.sqlite",
+	} {
+		if _, err := os.Stat(db); err == nil {
+			packageManager = "rpm"
+		}
+	}
+
 	switch packageManager {
 	case "dpkg":
 		return resolveDpkgDependencies(opens, executions)
 	default:
-		return nil, errors.New("unsupported build environment - cannot resolve dependencies")
+		return nil, fmt.Errorf("unsupported build environment '%s' - cannot resolve dependencies", packageManager)
 	}
 }

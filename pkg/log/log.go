@@ -23,7 +23,17 @@ func Debug(msg interface{}, keyvals ...interface{}) {
 
 // Info logs an info message.
 func Info(msg interface{}, keyvals ...interface{}) {
-	Logger.Info(msg, keyvals...)
+	if Logger.GetLevel() == DebugLevel {
+		Logger.Info(msg, keyvals...)
+		return
+	}
+
+	Logger.Print(msg, keyvals...)
+}
+
+// Print logs a message with no level.
+func Print(msg interface{}, keyvals ...interface{}) {
+	Info(msg, keyvals...)
 }
 
 // Warn logs a warning message.
@@ -43,16 +53,6 @@ func Fatal(msg interface{}, keyvals ...interface{}) {
 	os.Exit(1)
 }
 
-// Print logs a message with no level.
-func Print(msg interface{}, keyvals ...interface{}) {
-	if Logger.GetLevel() == DebugLevel {
-		Logger.Info(msg, keyvals...)
-		return
-	}
-
-	Logger.Print(msg, keyvals...)
-}
-
 // Debugf logs a debug message with formatting.
 func Debugf(format string, args ...interface{}) {
 	Logger.Debugf(format, args...)
@@ -60,7 +60,17 @@ func Debugf(format string, args ...interface{}) {
 
 // Infof logs an info message with formatting.
 func Infof(format string, args ...interface{}) {
-	Logger.Infof(format, args...)
+	if Logger.GetLevel() == DebugLevel {
+		Logger.Infof(format, args...)
+		return
+	}
+
+	Logger.Printf(format, args...)
+}
+
+// Printf logs a message with formatting and no level.
+func Printf(format string, args ...interface{}) {
+	Infof(format, args...)
 }
 
 // Warnf logs a warning message with formatting.
@@ -78,14 +88,4 @@ func Fatalf(format string, args ...interface{}) {
 	Logger.Print("")
 	Logger.Errorf(format, args...)
 	os.Exit(1)
-}
-
-// Printf logs a message with formatting and no level.
-func Printf(format string, args ...interface{}) {
-	if Logger.GetLevel() == DebugLevel {
-		Logger.Infof(format, args...)
-		return
-	}
-
-	Logger.Printf(format, args...)
 }

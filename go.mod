@@ -6,6 +6,7 @@ require (
 	github.com/CycloneDX/cyclonedx-go v0.8.0
 	github.com/charmbracelet/log v0.3.1
 	github.com/google/go-containerregistry v0.19.0
+	github.com/google/licensecheck v0.3.1
 	github.com/google/uuid v1.6.0
 	github.com/schollz/progressbar/v3 v3.14.2
 	github.com/spf13/cobra v1.8.0

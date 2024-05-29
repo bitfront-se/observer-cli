@@ -25,23 +25,21 @@ func (s *buildopsScanner) Id() string {
 }
 
 func (s *buildopsScanner) Priority() int {
-	return 100
+	return 1000
 }
 
-func (s *buildopsScanner) Scan(target scanTarget, output string) error {
+func (s *buildopsScanner) Scan(target *scanTarget, output string) error {
 	log := log.Logger.WithPrefix("buildops")
 
 	for filename, ecosystem := range target.files {
 		if filename == "build-observations.out" || filename == "build-observations.out.txt" {
 			log.Debug("found build observations file config file", "filename", filename, "ecosystem", ecosystem)
 
-			log.Infof("parsing build observations file %s", filename)
+			log.Debugf("parsing build observations file %s", filename)
 			opens, executions, err := buildops.ParseFile(filepath.Join(target.path, filename))
 			if err != nil {
 				return fmt.Errorf("failed to parse build observations file: %w", err)
 			}
-
-			// TODO: figure out which distro we are running in
 
 			log.Debugf("filtering dependencies from %d observed build operations", len(opens)+len(executions))
 			depOpens, depExecutions := buildops.DependencyObservations(opens, executions)
@@ -51,12 +49,16 @@ func (s *buildopsScanner) Scan(target scanTarget, output string) error {
 				return fmt.Errorf("failed to parse build observations file: %w", err)
 			}
 
-			log.Infof("resolved %d unique dependencies", len(dependencies.Code))
+			log.Debugf("resolved %d unique code dependencies", len(dependencies.Code))
+			log.Debugf("resolved %d unique tool dependencies", len(dependencies.Tools))
+			log.Debugf("resolved %d unique transitive dependencies", len(dependencies.Transitive))
 
 			err = s.generateCycloneDX(dependencies, target.config, output)
 			if err != nil {
 				return fmt.Errorf("failed to generate CycloneDX BOM: %w", err)
 			}
+
+			target.results = append(target.results, output)
 		}
 	}
 
@@ -75,18 +77,7 @@ func (s *buildopsScanner) generateCycloneDX(deps *buildops.BuildDependencies, co
 		Timestamp: createdAt.Format(JsonSchemaDateTimeFormat),
 		Tools: &cdx.ToolsChoice{
 			Components: &[]cdx.Component{
-				{
-					Type:    cdx.ComponentTypeApplication,
-					Name:    "sbom.observer (cli)",
-					Version: "1.0", // TODO: should be git version
-					ExternalReferences: &[]cdx.ExternalReference{
-						{
-							Type: cdx.ERTypeWebsite,
-							URL:  "https://github.com/sbom-observer/observer-cli",
-							//Comment: "",
-						},
-					},
-				},
+				ObserverCliCycloneDxTool,
 				{
 					Type:    cdx.ComponentTypeApplication,
 					Name:    "build-observer",
@@ -131,9 +122,9 @@ func (s *buildopsScanner) generateCycloneDX(deps *buildops.BuildDependencies, co
 	// components
 	var components []cdx.Component
 	var rootDependencies []string
-	dependencies := map[string][]string{}
 
 	index := map[string]int{}
+	nameIndex := map[string]int{}
 
 	for _, dep := range deps.Code {
 		// TODO: add distro
@@ -151,32 +142,33 @@ func (s *buildopsScanner) generateCycloneDX(deps *buildops.BuildDependencies, co
 			PackageURL: purl,
 		}
 
+		for _, license := range dep.Licenses {
+			if component.Licenses == nil {
+				component.Licenses = &cdx.Licenses{}
+			}
+			*component.Licenses = append(*component.Licenses, cdx.LicenseChoice{
+				License: &cdx.License{
+					ID: license.Id,
+				},
+			})
+		}
+
 		components = append(components, component)
 		index[dep.Id] = len(components) - 1
+		nameIndex[dep.Name] = len(components) - 1
 
 		if !dep.IsSourcePackage {
 			rootDependencies = append(rootDependencies, component.BOMRef)
 		}
 	}
 
-	// source packages
-	for _, dep := range deps.Code {
-		component := components[index[dep.Id]]
-		if len(dep.Dependencies) > 0 {
-			for _, sourceDep := range dep.Dependencies {
-				i, found := index[sourceDep]
-				if !found {
-					log.Error("build observation source package dependency not found", "sourceDep", sourceDep)
-					continue
-				}
-				sourceComponent := components[i]
-				dependencies[component.BOMRef] = append(dependencies[component.BOMRef], sourceComponent.BOMRef)
-			}
-		}
-	}
-
 	for _, dep := range deps.Tools {
-		// TODO: add distro
+		// skip if already added to BOM
+		if _, found := index[dep.Id]; found {
+			continue
+		}
+
+		// TODO: add distro qualifier
 		purl := fmt.Sprintf("pkg:deb/debian/%s@%s?arch=%s", dep.Name, dep.Version, dep.Arch)
 
 		component := cdx.Component{
@@ -185,13 +177,6 @@ func (s *buildopsScanner) generateCycloneDX(deps *buildops.BuildDependencies, co
 			Name:       dep.Name,
 			Version:    dep.Version,
 			PackageURL: purl,
-			// TODO: revisit
-			//Properties: &[]cdx.Property{
-			//	{
-			//		Name:  "observer:build:role",
-			//		Value: "tool",
-			//	},
-			//},
 		}
 
 		var subComponents []cdx.Component
@@ -219,9 +204,51 @@ func (s *buildopsScanner) generateCycloneDX(deps *buildops.BuildDependencies, co
 
 		components = append(components, component)
 		index[dep.Id] = len(components) - 1
+		nameIndex[dep.Name] = len(components) - 1
 
-		if !dep.IsSourcePackage {
-			rootDependencies = append(rootDependencies, component.BOMRef)
+		if dep.IsSourcePackage {
+			log.Error("cyclonedx: tools: build observation tool is unexpectedly transitive dependency", "tool", dep.Name)
+		}
+
+		rootDependencies = append(rootDependencies, component.BOMRef)
+	}
+
+	for _, dep := range deps.Transitive {
+		// skip if already added to BOM
+		if _, found := index[dep.Id]; found {
+			continue
+		}
+
+		// TODO: add distro qualifier
+		purl := fmt.Sprintf("pkg:deb/debian/%s@%s?arch=%s", dep.Name, dep.Version, dep.Arch)
+
+		component := cdx.Component{
+			BOMRef:     purl,
+			Type:       cdx.ComponentTypeLibrary,
+			Name:       dep.Name,
+			Version:    dep.Version,
+			PackageURL: purl,
+		}
+
+		components = append(components, component)
+		index[dep.Id] = len(components) - 1
+		nameIndex[dep.Name] = len(components) - 1
+	}
+
+	// resolve code and package dependencies
+	dependencies := map[string][]string{}
+	for _, dep := range append(deps.Code, deps.Tools...) {
+		component := components[index[dep.Id]]
+		if len(dep.Dependencies) > 0 {
+			for _, sourceDep := range dep.Dependencies {
+				i, found := nameIndex[sourceDep]
+				if !found {
+					log.Warn("cyclonedx: dependencies: build observation package dependency not found", "sourceDep", sourceDep)
+					continue
+				}
+				sourceComponent := components[i]
+				dependencies[component.BOMRef] = append(dependencies[component.BOMRef], sourceComponent.BOMRef)
+			}
 		}
 	}
 
@@ -229,7 +256,7 @@ func (s *buildopsScanner) generateCycloneDX(deps *buildops.BuildDependencies, co
 
 	ds := []cdx.Dependency{}
 	for bomRef, refs := range dependencies {
-		rc := refs
+		rc := deduplicate(refs)
 		ds = append(ds, cdx.Dependency{
 			Ref:          bomRef,
 			Dependencies: &rc,
@@ -238,7 +265,7 @@ func (s *buildopsScanner) generateCycloneDX(deps *buildops.BuildDependencies, co
 
 	bom.Components = &components
 	bom.Dependencies = &ds
-	
+
 	// marshal bom as json and write to file output
 	file, err := os.Create(output)
 	if err != nil {
@@ -272,4 +299,16 @@ func HashFileSha256(filePath string) (string, error) {
 	}
 
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func deduplicate[T comparable](sliceList []T) []T {
+	allKeys := make(map[T]bool)
+	list := []T{}
+	for _, item := range sliceList {
+		if _, value := allKeys[item]; !value {
+			allKeys[item] = true
+			list = append(list, item)
+		}
+	}
+	return list
 }

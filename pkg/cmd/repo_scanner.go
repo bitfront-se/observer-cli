@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/CycloneDX/cyclonedx-go"
@@ -22,6 +23,13 @@ const EcosystemNpm Ecosystem = "npm"
 const EcosystemNuget Ecosystem = "nuget"
 const EcosystemPython Ecosystem = "python"
 const EcosystemJava Ecosystem = "java"
+const EcosystemRuby Ecosystem = "ruby"
+const EcosystemPhp Ecosystem = "php"
+const EcosystemRust Ecosystem = "rust"
+const EcosystemConan Ecosystem = "conan"
+const EcosystemElixir Ecosystem = "elixir"
+const EcosystemDart Ecosystem = "dart"
+const EcosystemSwift Ecosystem = "swift"
 const EcosystemBuildObserver Ecosystem = "build-observer"
 const EcosystemObserver Ecosystem = "observer"
 
@@ -32,15 +40,31 @@ const EcosystemUnknown Ecosystem = "unknown"
 type BomMetadata cyclonedx.Metadata
 
 type ScanConfig struct {
-	Supplier struct {
-		Name string `yaml:"name"`
-		URL  string `yaml:"url"`
-	}
-	Component struct {
-		Name    string `yaml:"name"`
-		Group   string `yaml:"group"`
-		Version string `yaml:"version"`
-	}
+	OutputTemplate string                         `yaml:"output,omitempty"`
+	Component      ScanConfigComponent            `yaml:"component,omitempty"`
+	Supplier       ScanConfigOrganizationalEntity `yaml:"supplier,omitempty"`
+	Manufacturer   ScanConfigOrganizationalEntity `yaml:"manufacturer,omitempty"`
+}
+
+type ScanConfigOrganizationalEntity struct {
+	Name     string              `yaml:"name,omitempty"`
+	URL      string              `yaml:"url,omitempty"`
+	Contacts []ScanConfigContact `yaml:"contacts,omitempty"`
+}
+
+type ScanConfigContact struct {
+	Name  string `yaml:"name,omitempty"`
+	Email string `yaml:"email,omitempty"`
+	Phone string `yaml:"phone,omitempty"`
+}
+
+type ScanConfigComponent struct {
+	Type        string `yaml:"type,omitempty"`
+	Name        string `yaml:"name,omitempty"`
+	Group       string `yaml:"group,omitempty"`
+	Version     string `yaml:"version,omitempty"`
+	Description string `yaml:"description,omitempty"`
+	License     string `yaml:"license,omitempty"`
 }
 
 type scanTarget struct {
@@ -48,9 +72,10 @@ type scanTarget struct {
 	files    map[string]Ecosystem
 	metadata BomMetadata
 	config   ScanConfig
+	results  []string
 }
 
-func findScanTargets(initialTarget string, maxDepth uint) (map[string]scanTarget, error) {
+func findScanTargets(initialTarget string, maxDepth uint) (map[string]*scanTarget, error) {
 	// resolve "." to the current working directory so we get sane naming
 	if initialTarget == "." {
 		cwd, err := os.Getwd()
@@ -63,7 +88,7 @@ func findScanTargets(initialTarget string, maxDepth uint) (map[string]scanTarget
 	initialTarget = filepath.Clean(initialTarget)
 	initialDepth := strings.Count(initialTarget, string(os.PathSeparator))
 
-	targets := map[string]scanTarget{}
+	targets := map[string]*scanTarget{}
 
 	err := filepath.WalkDir(initialTarget, func(currentPath string, file fs.DirEntry, err error) error {
 		depth := strings.Count(currentPath, string(os.PathSeparator)) - initialDepth
@@ -89,17 +114,23 @@ func findScanTargets(initialTarget string, maxDepth uint) (map[string]scanTarget
 		}
 
 		relativePath := strings.TrimPrefix(currentPath, initialTarget)
-
 		directoryPath := filepath.Dir(currentPath)
 
 		// check if it's a "file-of-interest"
 		ecosystem := IdentifyEcosystem(relativePath, file.Name())
+
 		if ecosystem != EcosystemUnknown {
 			target, found := targets[directoryPath]
 			if !found {
-				target = scanTarget{
+				target = &scanTarget{
 					path:  directoryPath,
 					files: map[string]Ecosystem{},
+					config: ScanConfig{
+						Component: ScanConfigComponent{
+							// setup up a basic component name based on the directory name
+							Name: filepath.Base(directoryPath),
+						},
+					},
 				}
 				targets[directoryPath] = target
 			}
@@ -114,18 +145,32 @@ func findScanTargets(initialTarget string, maxDepth uint) (map[string]scanTarget
 
 func IdentifyEcosystem(path string, fileName string) Ecosystem {
 	switch fileName {
+	case "Gemfile.lock":
+		return EcosystemRuby
+	case "composer.lock":
+		return EcosystemPhp
+	case "Cargo.lock":
+		return EcosystemRust
+	case "conan.lock":
+		return EcosystemConan
+	case "mix.lock":
+		return EcosystemElixir
+	case "pubspec.lock":
+		return EcosystemDart
+	case "Podfile.lock", "Package.resolved":
+		return EcosystemSwift
 	case "package.json", "package-lock.json", "npm-shrinkwrap.json", ".npmrc", "yarn.lock", "pnpm-lock.yaml":
 		return EcosystemNpm
 	case "go.mod", "go.sum":
 		return EcosystemGo
-	case "packages.lock.json", "project.assets.json", "packages.config":
+	case "packages.lock.json", "project.assets.json", "packages.config", ".deps.json", "Packages.props", "Directory.Packages.props":
 		return EcosystemNuget
+	case "pom.xml":
+		return EcosystemJava
 	case "build.gradle", "build.gradle.kts", "gradle.lockfile", "buildscript-gradle.lockfile", "settings.gradle", "settings.gradle.kts":
 		return EcosystemJava
 	case "pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile", "Pipfile.lock", "poetry.lock":
 		return EcosystemPython
-	case "pom.xml":
-		return EcosystemJava
 	case "observer.yml", "observer.yaml":
 		return EcosystemObserver
 	case "build-observations.out", "build-observations.out.txt":
@@ -144,23 +189,23 @@ func IdentifyEcosystem(path string, fileName string) Ecosystem {
 type RepoScanner interface {
 	Id() string
 	Priority() int
-	Scan(scanTarget, string) error
+	Scan(*scanTarget, string) error
 }
 
 func scannersForTarget(target scanTarget) []RepoScanner {
 	scanners := map[string]RepoScanner{}
 	for _, ecosystem := range target.files {
-		scanner := scannerForEcosystem(ecosystem)
-		if scanner == nil {
+		sfe := scannersForEcosystem(ecosystem)
+		if len(sfe) == 0 {
 			log.Debug("skipping unsupported ecosystem", "ecosystem", ecosystem)
 			continue
 		}
-		if _, ok := scanners[scanner.Id()]; !ok {
-			scanners[scanner.Id()] = scanner
+		for _, scanner := range sfe {
+			if _, ok := scanners[scanner.Id()]; !ok {
+				scanners[scanner.Id()] = scanner
+			}
 		}
 	}
-
-	log.Debug("scannersForTarget", "target", target, "scanners", maps.Keys(scanners))
 
 	effectiveScanners := maps.Values(scanners)
 
@@ -168,18 +213,26 @@ func scannersForTarget(target scanTarget) []RepoScanner {
 		return a.Priority() - b.Priority()
 	})
 
+	for _, scanner := range effectiveScanners {
+		log.Debug("scannersForTarget", "target", target.files, "effectiveScanners", scanner.Id())
+	}
+
 	return effectiveScanners
 }
 
-func scannerForEcosystem(ecosystem Ecosystem) RepoScanner {
+func scannersForEcosystem(ecosystem Ecosystem) []RepoScanner {
 	switch ecosystem {
 	case EcosystemObserver:
-		return &configRepoScanner{}
+		return []RepoScanner{&configRepoScanner{}}
 	case EcosystemBuildObserver:
-		return &buildopsScanner{}
+		return []RepoScanner{&buildopsScanner{}}
+	case EcosystemNpm:
+		return []RepoScanner{
+			&moduleNameScanner{},
+			&trivyRepoScanner{},
+		}
 	default:
-		//return &trivyRepoScanner{}
-		return nil
+		return []RepoScanner{&trivyRepoScanner{}}
 	}
 }
 
@@ -193,10 +246,10 @@ func (s *configRepoScanner) Priority() int {
 	return 100
 }
 
-func (s *configRepoScanner) Scan(target scanTarget, _ string) error {
-	for filename, ecosystem := range target.files {
+func (s *configRepoScanner) Scan(target *scanTarget, _ string) error {
+	for filename, _ := range target.files {
 		if filename == "observer.yml" || filename == "observer.yaml" {
-			log.Debug("found observer config file", "filename", filename, "ecosystem", ecosystem)
+			log.Info("parsing observer config file", "filename", filename)
 			bs, err := os.ReadFile(filepath.Join(target.path, filename))
 			if err != nil {
 				return err
@@ -225,8 +278,8 @@ func (s *trivyRepoScanner) Priority() int {
 	return 1000
 }
 
-func (s *trivyRepoScanner) Scan(target scanTarget, output string) error {
-	output, err := Trivy("fs", "--skip-db-update", "--skip-java-db-update", "--format", "cyclonedx", "--output", output, target.path)
+func (s *trivyRepoScanner) Scan(target *scanTarget, output string) error {
+	_, err := Trivy("fs", "--skip-db-update", "--skip-java-db-update", "--format", "cyclonedx", "--output", output, target.path)
 	if err != nil {
 		var extCmdErr *execx.ExternalCommandError
 		if errors.As(err, &extCmdErr) {
@@ -239,6 +292,53 @@ func (s *trivyRepoScanner) Scan(target scanTarget, output string) error {
 
 		log.Error("failed to create sbom for repository using Trivy", "err", err)
 		return err
+	}
+
+	target.results = append(target.results, output)
+	return nil
+}
+
+type moduleNameScanner struct{}
+
+func (s *moduleNameScanner) Id() string {
+	return "moduleName"
+}
+
+func (s *moduleNameScanner) Priority() int {
+	return 200
+}
+
+func (s *moduleNameScanner) Scan(target *scanTarget, _ string) error {
+	for filename, ecosystem := range target.files {
+		if filename == "package.json" {
+			log.Debug("found package.json config file", "filename", filename, "ecosystem", ecosystem)
+
+			contents := struct {
+				Name    string `json:"name"`
+				Version string `json:"version"`
+			}{}
+
+			f, err := os.Open(filepath.Join(target.path, filename))
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+
+			err = json.NewDecoder(f).Decode(&contents)
+			if err != nil {
+				return err
+			}
+
+			if target.config.Component.Name == "" {
+				target.config.Component.Name = contents.Name
+			}
+
+			if target.config.Component.Version == "" {
+				target.config.Component.Version = contents.Version
+			}
+
+			log.Debug("loaded config", "config", target.config)
+		}
 	}
 
 	return nil
