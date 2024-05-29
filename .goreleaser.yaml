@@ -12,16 +12,17 @@ before:
     - go generate ./...
 
 builds:
-  - env:
+  - id: 'observer'
+    binary: 'observer'
+    env:
       - CGO_ENABLED=0
     goos:
       - linux
       - windows
       - darwin
-    hooks:
-      post:
-#         runs for every which is unnecessary
-        - trivy repo -f cyclonedx -o dist/bom.cdx.json .
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{ .CommitDate }} -X main.treeState={{ .IsGitDirty }}
 
 archives:
   - format: tar.gz
@@ -37,6 +38,40 @@ archives:
     format_overrides:
       - goos: windows
         format: zip
+
+nfpms:
+  - file_name_template: "{{ .ConventionalFileName }}"
+    id: packages
+    homepage: https://github.com/sbom-observer/observer-cli
+    description: |-
+      Generate SBOMs and optionally upload them to https://sbom.observer
+    maintainer: Andreas Bielk <andreas@sbom.observer>
+    license: Apache-2.0
+    vendor: Bitfront AB
+    bindir: /usr/bin
+    section: utils
+    contents:
+      - src: ./LICENSE
+        dst: /usr/share/doc/observer/copyright
+        file_info:
+          mode: 0644
+    formats:
+#      - apk
+      - deb
+      - rpm
+#      - archlinux
+    deb:
+      lintian_overrides:
+        - statically-linked-binary
+        - changelog-file-missing-in-native-package
+
+sboms:
+  - id: "cyclonedx"
+    artifacts: any
+    documents:
+      - "observer.sbom.json"
+    cmd: 'trivy'
+    args: [ "repo", "--skip-java-db-update", "--skip-dirs", "testdata", "-f", "cyclonedx", "-o", "$document", ".." ]
 
 changelog:
   sort: asc
