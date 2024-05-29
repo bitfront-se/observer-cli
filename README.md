@@ -24,10 +24,6 @@ Flags:
 Use "observer [command] --help" for more information about a command.
 ```
 
-## Authentication
-
-The CLI expects an `OBSERVER_TOKEN` environment variable to be set with a valid API token.
-
 ## SBOM generation
 
 This tool is primarily a *meta* scanner, meaning that in most cases it delegates the actual generation to other tools like [Syft](https://github.com/anchore/syft) or [Trivy](https://github.com/aquasecurity/trivy).
@@ -57,6 +53,11 @@ supplier:
           email: john.doe@example.com
           phone: "123"
 ```
+
+## Authentication with SBOM Observer
+
+To upload SBOMs to [SBOM Observer](https://sbom.observer) the CLI expects an `OBSERVER_TOKEN` environment variable to be set with a valid API token.
+
 
 ### Preview: Support for C/C++ projects
 
