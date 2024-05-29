@@ -12,6 +12,7 @@ import (
 	"sbom.observer/cli/pkg/buildops"
 	"sbom.observer/cli/pkg/ids"
 	"sbom.observer/cli/pkg/log"
+	"sbom.observer/cli/pkg/types"
 	"time"
 )
 
@@ -77,7 +78,17 @@ func (s *buildopsScanner) generateCycloneDX(deps *buildops.BuildDependencies, co
 		Timestamp: createdAt.Format(JsonSchemaDateTimeFormat),
 		Tools: &cdx.ToolsChoice{
 			Components: &[]cdx.Component{
-				ObserverCliCycloneDxTool,
+				cdx.Component{
+					Type:    cdx.ComponentTypeApplication,
+					Name:    "sbom.observer (cli)",
+					Version: types.Version,
+					ExternalReferences: &[]cdx.ExternalReference{
+						{
+							Type: cdx.ERTypeWebsite,
+							URL:  "https://github.com/sbom-observer/observer-cli",
+						},
+					},
+				},
 				{
 					Type:    cdx.ComponentTypeApplication,
 					Name:    "build-observer",

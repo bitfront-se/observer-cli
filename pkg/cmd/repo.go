@@ -18,19 +18,6 @@ import (
 	"time"
 )
 
-var ObserverCliCycloneDxTool = cdx.Component{
-	Type:    cdx.ComponentTypeApplication,
-	Name:    "sbom.observer (cli)",
-	Version: "1.0", // TODO: should be git version
-	ExternalReferences: &[]cdx.ExternalReference{
-		{
-			Type: cdx.ERTypeWebsite,
-			URL:  "https://github.com/sbom-observer/observer-cli",
-			//Comment: "",
-		},
-	},
-}
-
 // repoCmd represents the repo command
 var repoCmd = &cobra.Command{
 	Aliases: []string{"repository"},
@@ -324,7 +311,17 @@ func mergeSBOMs(files []string, destination string, config ScanConfig) error {
 		if merged.Metadata.Tools.Components == nil {
 			merged.Metadata.Tools.Components = &[]cdx.Component{}
 		}
-		*merged.Metadata.Tools.Components = append(*merged.Metadata.Tools.Components, ObserverCliCycloneDxTool)
+		*merged.Metadata.Tools.Components = append(*merged.Metadata.Tools.Components, cdx.Component{
+			Type:    cdx.ComponentTypeApplication,
+			Name:    "sbom.observer (cli)",
+			Version: types.Version,
+			ExternalReferences: &[]cdx.ExternalReference{
+				{
+					Type: cdx.ERTypeWebsite,
+					URL:  "https://github.com/sbom-observer/observer-cli",
+				},
+			},
+		})
 	}
 
 	out, err := os.Create(destination)

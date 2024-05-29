@@ -4,6 +4,7 @@ import (
 	"github.com/spf13/cobra"
 	"os"
 	"sbom.observer/cli/pkg/log"
+	"sbom.observer/cli/pkg/types"
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -28,8 +29,8 @@ PREVIEW: This is a preview release and is not yet ready for production use.`,
 
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
-func Execute(version string) {
-	rootCmd.Version = version
+func Execute() {
+	rootCmd.Version = types.Version
 	err := rootCmd.Execute()
 	if err != nil {
 		os.Exit(1)
