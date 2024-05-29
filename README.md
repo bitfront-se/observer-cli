@@ -59,7 +59,7 @@ supplier:
 To upload SBOMs to [SBOM Observer](https://sbom.observer) the CLI expects an `OBSERVER_TOKEN` environment variable to be set with a valid API token.
 
 
-### Preview: Support for C/C++ projects
+## Preview: Support for C/C++ projects
 
 Using a combination of [build-observer](https://github.com/sbom-observer/build-observer) and the `repo` command, you can create SBOMs for C/C++ projects.
 
